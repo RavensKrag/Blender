@@ -143,6 +143,7 @@ static XVisualInfo *x11_visualinfo_from_glx(Display *display,
 #  endif
 
 #  ifdef WITH_X11_ALPHA
+  needAlpha = true;
   if (needAlpha && glx_version >= 103 &&
       (glXChooseFBConfig || (glXChooseFBConfig = (PFNGLXCHOOSEFBCONFIGPROC)glXGetProcAddressARB(
                                  (const GLubyte *)"glXChooseFBConfig")) != NULL) &&
@@ -158,10 +159,11 @@ static XVisualInfo *x11_visualinfo_from_glx(Display *display,
 
     /* Any sample level or even zero, which means oversampling disabled, is good
      * but we need a valid visual to continue */
+    XVisualInfo *visual;
     if (nbfbconfig > 0) {
       /* take a frame buffer config that has alpha cap */
       for (int i = 0; i < nbfbconfig; i++) {
-        XVisualInfo *visual = (XVisualInfo *)glXGetVisualFromFBConfig(display, fbconfigs[i]);
+        visual = (XVisualInfo *)glXGetVisualFromFBConfig(display, fbconfigs[i]);
         if (!visual)
           continue;
         /* if we don't need a alpha background, the first config will do, otherwise
@@ -170,17 +172,16 @@ static XVisualInfo *x11_visualinfo_from_glx(Display *display,
           XRenderPictFormat *pict_format = XRenderFindVisualFormat(display, visual->visual);
           if (!pict_format)
             continue;
-          if (pict_format->direct.alphaMask <= 0)
-            continue;
+          if (pict_format->direct.alphaMask > 0){
+            *fbconfig = fbconfigs[i];
+            break;
+          }
         }
-
-        *fbconfig = fbconfigs[i];
-        XFree(fbconfigs);
-
-        return visual;
+        
       }
 
       XFree(fbconfigs);
+      return visual;
     }
   }
   else
