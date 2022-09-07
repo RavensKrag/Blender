@@ -354,7 +354,7 @@ GHOST_IWindow *GHOST_SystemX11::createWindow(const char *title,
                                is_dialog,
                                ((glSettings.flags & GHOST_glStereoVisual) != 0),
                                exclusive,
-                               ((glSettings.flags & GHOST_glAlphaBackground) != 0),
+                               (true),
                                (glSettings.flags & GHOST_glDebugContext) != 0);
 
   if (window) {
