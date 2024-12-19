@@ -19,6 +19,8 @@
 #include "GHOST_WindowX11.hh"
 #include "GHOST_utildefines.hh"
 
+#include <X11/extensions/Xrender.h>
+
 #ifdef WITH_XDND
 #  include "GHOST_DropTargetX11.hh"
 #endif
@@ -99,6 +101,81 @@ static XVisualInfo *get_x11_visualinfo(Display *display)
 }
 #endif
 
+static XVisualInfo *x11_visualinfo_from_glx(Display *display,
+                                            bool stereoVisual,
+                                            bool needAlpha,
+                                            GLXFBConfig *fbconfig)
+{
+  int glx_major, glx_minor, glx_version; /* GLX version: major.minor */
+  int glx_attribs[64];
+
+  *fbconfig = nullptr;
+
+  /* Set up the minimum attributes that we require and see if
+   * X can find us a visual matching those requirements. */
+
+  if (!glXQueryVersion(display, &glx_major, &glx_minor)) {
+    fprintf(stderr,
+            "%s:%d: X11 glXQueryVersion() failed, "
+            "verify working openGL system!\n",
+            __FILE__,
+            __LINE__);
+
+    return nullptr;
+  }
+  glx_version = glx_major * 100 + glx_minor;
+  if (needAlpha && glx_version >= 103 &&
+      (glXChooseFBConfig || (glXChooseFBConfig = (PFNGLXCHOOSEFBCONFIGPROC)glXGetProcAddressARB(
+                                 (const GLubyte *)"glXChooseFBConfig")) != nullptr) &&
+      (glXGetVisualFromFBConfig ||
+       (glXGetVisualFromFBConfig = (PFNGLXGETVISUALFROMFBCONFIGPROC)glXGetProcAddressARB(
+            (const GLubyte *)"glXGetVisualFromFBConfig")) != nullptr)) {
+
+    GHOST_X11_GL_GetAttributes(glx_attribs, 64, stereoVisual, needAlpha, true);
+
+    int nbfbconfig;
+    GLXFBConfig *fbconfigs = glXChooseFBConfig(
+        display, DefaultScreen(display), glx_attribs, &nbfbconfig);
+
+    /* Any sample level or even zero, which means oversampling disabled, is good
+     * but we need a valid visual to continue */
+    if (nbfbconfig > 0) {
+      /* take a frame buffer config that has alpha cap */
+      for (int i = 0; i < nbfbconfig; i++) {
+        XVisualInfo *visual = (XVisualInfo *)glXGetVisualFromFBConfig(display, fbconfigs[i]);
+        if (!visual)
+          continue;
+        /* if we don't need a alpha background, the first config will do, otherwise
+         * test the alphaMask as it won't necessarily be present */
+        if (needAlpha) {
+          XRenderPictFormat *pict_format = XRenderFindVisualFormat(display, visual->visual);
+          if (!pict_format)
+            continue;
+          if (pict_format->direct.alphaMask <= 0)
+            continue;
+        }
+
+        *fbconfig = fbconfigs[i];
+        XFree(fbconfigs);
+
+        return visual;
+      }
+
+      XFree(fbconfigs);
+    }
+  }
+
+  /* All options exhausted, cannot continue */
+  fprintf(stderr,
+          "%s:%d: X11 glXChooseVisual() failed, "
+          "verify working openGL system!\n",
+          __FILE__,
+          __LINE__);
+
+  return nullptr;
+}
+
+
 GHOST_WindowX11::GHOST_WindowX11(GHOST_SystemX11 *system,
                                  Display *display,
                                  const char *title,
@@ -138,7 +215,13 @@ GHOST_WindowX11::GHOST_WindowX11(GHOST_SystemX11 *system,
 {
 #ifdef WITH_OPENGL_BACKEND
   if (type == GHOST_kDrawingContextTypeOpenGL) {
-    m_visualInfo = get_x11_visualinfo(m_display);
+    // m_visualInfo = get_x11_visualinfo(m_display);
+    m_visualInfo = x11_visualinfo_from_glx(
+      m_display,
+      false, // stereoVisual
+      true, // needAlpha
+      (GLXFBConfig *)&m_fbconfig
+    );
   }
   else
 #endif
